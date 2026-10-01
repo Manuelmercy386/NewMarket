@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#F8FAFC] text-[#111827] font-sans antialiased selection:bg-[#395082] selection:text-white;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Campus Cards & Surfaces */
+.kv-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kv-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 12px 24px -10px rgba(57, 80, 130, 0.12), 0 4px 8px -2px rgba(0, 0, 0, 0.04);
+}
+
+/* Gradient helpers */
+.gradient-primary {
+  background: linear-gradient(135deg, #395082 0%, #111827 100%);
+}
+
+.gradient-orange {
+  background: linear-gradient(135deg, #ff7e00 0%, #ff9e3b 100%);
+}

@@ -1,0 +1,95 @@
+// Prisma schema for NewMarket multi-vendor campus storefront
+// Matches the exact DBML schema in the project architecture PDF
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  BUYER
+  VENDOR
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PROCESSING
+  READY_FOR_PICKUP
+  DELIVERED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(BUYER)
+  createdAt    DateTime @default(now())
+
+  stores Stores[]
+  orders Orders[]
+}
+
+model Stores {
+  id          String   @id @default(uuid())
+  vendorId    String
+  storeName   String
+  description String?
+  category    String?
+  avatar      String?
+  banner      String?
+  location    String?
+  whatsApp    String?
+  createdAt   DateTime @default(now())
+
+  vendor     User         @relation(fields: [vendorId], references: [id])
+  products   Products[]
+  orderItems OrderItems[]
+}
+
+model Products {
+  id            String   @id @default(uuid())
+  storeId       String
+  name          String
+  description   String?
+  price         Float
+  stockQuantity Int      @default(0)
+  imageUrl      String?
+  category      String?
+  createdAt     DateTime @default(now())
+
+  store      Stores       @relation(fields: [storeId], references: [id])
+  orderItems OrderItems[]
+}
+
+model Orders {
+  id            String   @id @default(uuid())
+  buyerId       String
+  totalAmount   Float
+  paymentStatus String   @default("PENDING")
+  createdAt     DateTime @default(now())
+
+  buyer      User         @relation(fields: [buyerId], references: [id])
+  orderItems OrderItems[]
+}
+
+model OrderItems {
+  id        String      @id @default(uuid())
+  orderId   String
+  storeId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  status    OrderStatus @default(PENDING)
+
+  order   Orders   @relation(fields: [orderId], references: [id])
+  store   Stores   @relation(fields: [storeId], references: [id])
+  product Products @relation(fields: [productId], references: [id])
+}
