@@ -14,11 +14,11 @@ export const Footer = () => {
             <span className="text-lg font-extrabold text-slate-900">New<span className="text-[#395082]">Market</span></span>
           </div>
           <p className="text-slate-500 leading-relaxed text-[11px]">
-            The unified campus marketplace empowering student entrepreneurs with multi-vendor storefronts, escrow-protected payments, and doorstep hostel delivery.
+            The campus marketplace connecting student buyers with student-run storefronts and Paystack-verified orders.
           </p>
           <div className="flex items-center gap-1.5 text-[11px] text-[#1b9e4b] font-semibold">
             <ShieldCheck className="w-4 h-4" />
-            <span>Escrow Protected Student Commerce</span>
+            <span>Paystack-verified payments</span>
           </div>
         </div>
 
@@ -45,10 +45,10 @@ export const Footer = () => {
         <div>
           <h4 className="text-slate-900 font-extrabold mb-3">Campus Safety & Trust</h4>
           <div className="space-y-2 text-[11px]">
-            <p className="text-slate-500">All student transactions are verified through student ID and hostel confirmation.</p>
+            <p className="text-slate-500">Use accurate contact and campus delivery details when placing an order.</p>
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <p className="font-extrabold text-slate-900">Buyer Protection:</p>
-              <p className="text-slate-600">Funds are held in escrow and released to student sellers only after doorstep delivery confirmation.</p>
+              <p className="font-extrabold text-slate-900">Payment verification:</p>
+              <p className="text-slate-600">Payments are verified with Paystack before vendors can begin order fulfillment.</p>
             </div>
           </div>
         </div>
@@ -62,7 +62,7 @@ export const Footer = () => {
           <span>•</span>
           <span className="flex items-center gap-1 text-[#395082] font-semibold">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Escrow Guaranteed</span>
+            <span>Payment status verified</span>
           </span>
         </div>
       </div>

@@ -1,806 +1,608 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
+import { PrismaClient } from '@prisma/client';
 
 dotenv.config();
 
 const app = express();
+const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'newmarket_campus_super_secret_jwt_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+const SERVICE_FEE = 500;
+const DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+const DEFAULT_BANNER = 'https://images.unsplash.com/photo-1517433670267-08bbd4be890f?w=1000&auto=format&fit=crop&q=80';
+
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET must be configured with at least 32 characters.');
+}
+
+const cloudinaryConfigured = Boolean(
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY &&
+  process.env.CLOUDINARY_API_SECRET
+);
+
+if (cloudinaryConfigured) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+}
 
 app.use(cors());
-app.use(express.json());
 
-// In-Memory Database Store (Mirroring Prisma DBML Schema with Campus Marketplace Data)
-let users = [
-  {
-    id: 'user-buyer-1',
-    fullName: 'Tobi Adebayo',
-    email: 'tobi@student.edu.ng',
-    passwordHash: '$2a$10$e8WpG9X6bQ8g7H8K6T5Ue.3B0Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z',
-    role: 'BUYER',
-    campus: 'Obafemi Awolowo University (OAU)',
-    hostel: 'Fajuyi Hall, Block 3, Room 14',
-    createdAt: new Date(),
-  },
-  {
-    id: 'user-vendor-1',
-    fullName: 'Amina Bello (400L Food Sci)',
-    email: 'amina@sweettooth.ng',
-    passwordHash: '$2a$10$e8WpG9X6bQ8g7H8K6T5Ue.3B0Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z',
-    role: 'VENDOR',
-    campus: 'Obafemi Awolowo University (OAU)',
-    storeId: 'store-1',
-    createdAt: new Date(),
-  },
-  {
-    id: 'user-vendor-2',
-    fullName: 'David Okafor (300L Elect/Elect)',
-    email: 'david@techplug.ng',
-    passwordHash: '$2a$10$e8WpG9X6bQ8g7H8K6T5Ue.3B0Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z',
-    role: 'VENDOR',
-    campus: 'Obafemi Awolowo University (OAU)',
-    storeId: 'store-2',
-    createdAt: new Date(),
-  }
-];
+function safeUser(user) {
+  const { passwordHash, ...publicUser } = user;
+  return { ...publicUser, avatar: DEFAULT_AVATAR };
+}
 
-let stores = [
-  {
-    id: 'store-1',
-    vendorId: 'user-vendor-1',
-    vendorName: 'Amina Bello',
-    storeName: 'Sweet Tooth Bakes',
-    slug: 'sweet-tooth-bakes',
-    tagline: 'Fresh hostel-baked pastries, cupcakes, cinnamon rolls & crunchy chinchin.',
-    description: 'Hostel-based bakery preparing fresh oven treats daily. Verified campus baker with 100% hostel doorstep delivery.',
-    category: 'pastry',
-    avatar: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=150&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1517433670267-08bbd4be890f?w=1000&auto=format&fit=crop&q=80',
-    rating: 4.9,
-    reviewsCount: 142,
+function presentStore(store) {
+  return {
+    ...store,
+    vendorName: store.vendor.fullName,
+    slug: store.storeName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+    tagline: store.tagline || '',
+    rating: 0,
+    reviewsCount: 0,
     deliveryTime: '15-25 mins',
-    location: 'Moremi Hall, Block B',
     verified: true,
-    badge: 'Campus Verified Vendor 🛡️',
-    whatsApp: '+2348012345678',
-    createdAt: new Date(),
-  },
-  {
-    id: 'store-2',
-    vendorId: 'user-vendor-2',
-    vendorName: 'David Okafor',
-    storeName: 'Campus Tech Plug',
-    slug: 'campus-tech-plug',
-    tagline: 'Fast chargers, ANC pods, OTG flash drives & laptop accessories.',
-    description: 'Trusted campus gadget hub. All accessories tested, authentic and backed by a 7-day student swap guarantee.',
-    category: 'tech',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1550009158-9ebf69173e03?w=1000&auto=format&fit=crop&q=80',
-    rating: 4.8,
-    reviewsCount: 98,
-    deliveryTime: '10-20 mins',
-    location: 'Faculty of Tech, SUB Shop 4',
-    verified: true,
-    badge: 'Student Tech Plug ⚡',
-    whatsApp: '+2348087654321',
-    createdAt: new Date(),
-  },
-  {
-    id: 'store-3',
-    vendorId: 'user-vendor-3',
-    vendorName: 'Chiamaka Nwosu',
-    storeName: 'Campus Drip & Wear',
-    slug: 'campus-drip-wear',
-    tagline: 'Custom faculty hoodies, aesthetic tote bags & curated campus thrift.',
-    description: 'Original campus streetwear, oversized tees, and cozy faculty hoodies made from premium heavyweight cotton.',
-    category: 'fashion',
-    avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1000&auto=format&fit=crop&q=80',
-    rating: 4.9,
-    reviewsCount: 210,
-    deliveryTime: 'Same Day Pickup',
-    location: 'SUB Complex, Floor 1',
-    verified: true,
-    badge: 'Top Fashion Vendor ✨',
-    whatsApp: '+2348055554444',
-    createdAt: new Date(),
-  },
-  {
-    id: 'store-4',
-    vendorId: 'user-vendor-4',
-    vendorName: 'Kemi & Tobi',
-    storeName: 'Hostel Glam & Skincare',
-    slug: 'hostel-glam-skincare',
-    tagline: 'Pocket sunscreens, lip glosses, press-on nails & roll-on fragrance oils.',
-    description: 'Dorm-friendly skincare and everyday student beauty essentials curated for busy lecture schedules.',
-    category: 'beauty',
-    avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
-    banner: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=1000&auto=format&fit=crop&q=80',
-    rating: 4.7,
-    reviewsCount: 84,
-    deliveryTime: '20-30 mins',
-    location: 'Akintola Hall, Wing C',
-    verified: true,
-    badge: 'Dorm Favorite 💖',
-    whatsApp: '+2348033332222',
-    createdAt: new Date(),
-  },
-];
+    badge: 'Campus Verified Vendor',
+  };
+}
 
-let products = [
-  {
-    id: 'prod-1',
-    storeId: 'store-1',
-    storeName: 'Sweet Tooth Bakes',
-    name: 'Red Velvet Gourmet Cupcakes (6-Pack)',
-    description: 'Moist red velvet cupcakes topped with cream cheese frosting and gold sprinkles.',
-    price: 4500,
-    originalPrice: 5500,
-    stockQuantity: 16,
-    category: 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1587668178277-295251f930f2?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 5.0,
-    reviews: 46,
-    badge: 'Fresh Today 🔥',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-2',
-    storeId: 'store-1',
-    storeName: 'Sweet Tooth Bakes',
-    name: 'Crunchy Milky ChinChin (500g Tub)',
-    description: 'Golden, extra-milky crispy chinchin. Perfect companion for late-night study sessions.',
-    price: 2500,
-    originalPrice: 3000,
-    stockQuantity: 40,
-    category: 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.8,
-    reviews: 32,
-    badge: 'Study Fuel ⚡',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-3',
-    storeId: 'store-2',
-    storeName: 'Campus Tech Plug',
-    name: 'ANC Noise-Canceling Wireless Earbuds',
-    description: 'Active Noise Cancellation with 30-hour battery life. Ideal for library focus and noisy hostels.',
-    price: 18500,
-    originalPrice: 22000,
-    stockQuantity: 12,
-    category: 'tech',
-    imageUrl: 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.9,
-    reviews: 89,
-    badge: 'Popular Plug ⚡',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-4',
-    storeId: 'store-2',
-    storeName: 'Campus Tech Plug',
-    name: '20,000mAh Dual Fast-Charge Power Bank',
-    description: 'Heavy-duty 22.5W fast-charging power bank with LED percentage display and dual Type-C.',
-    price: 24000,
-    originalPrice: 28000,
-    stockQuantity: 9,
-    category: 'tech',
-    imageUrl: 'https://images.unsplash.com/photo-1609592424074-b529735d4546?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.9,
-    reviews: 73,
-    badge: 'Exam Essential 🔋',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-5',
-    storeId: 'store-3',
-    storeName: 'Campus Drip & Wear',
-    name: 'Heavyweight Campus Varsity Hoodie',
-    description: '450GSM cozy cotton fleece with embroidered campus patch. Soft, warm interior.',
-    price: 19500,
-    originalPrice: 23000,
-    stockQuantity: 14,
-    category: 'fashion',
-    imageUrl: 'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 5.0,
-    reviews: 118,
-    badge: 'Best Drip ✨',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-6',
-    storeId: 'store-3',
-    storeName: 'Campus Drip & Wear',
-    name: 'Aesthetic Canvas Lecture Tote Bag',
-    description: 'Reinforced canvas book bag with inner zipper pocket, fits standard 14-inch laptops and notebooks.',
-    price: 6500,
-    originalPrice: 8000,
-    stockQuantity: 28,
-    category: 'fashion',
-    imageUrl: 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.7,
-    reviews: 52,
-    badge: 'Campus Classic 🎒',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-7',
-    storeId: 'store-4',
-    storeName: 'Hostel Glam & Skincare',
-    name: 'Hydrating Sunscreen Stick SPF50+',
-    description: 'Zero white-cast, non-greasy sunscreen stick for rapid reapplying under Nigerian sunshine.',
-    price: 9500,
-    originalPrice: 11000,
-    stockQuantity: 22,
-    category: 'beauty',
-    imageUrl: 'https://images.unsplash.com/photo-1608248597261-833258657b45?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.8,
-    reviews: 61,
-    badge: 'Hot Pick ☀️',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-8',
-    storeId: 'store-4',
-    storeName: 'Hostel Glam & Skincare',
-    name: 'Roll-On Pocket Fragrance Oil (Set of 3)',
-    description: 'Concentrated perfume oil pack (Vanilla Amber, Fresh Linen, Sweet Citrus). Long lasting 24-hour scent.',
-    price: 7500,
-    originalPrice: 9000,
-    stockQuantity: 15,
-    category: 'beauty',
-    imageUrl: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.9,
-    reviews: 44,
-    badge: 'Dorm Gem 🌸',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-9',
-    storeId: 'store-1',
-    storeName: 'Sweet Tooth Bakes',
-    name: 'Cinnamon Rolls (Box of 4)',
-    description: 'Fluffy, glazed cinnamon rolls with cream cheese icing. Perfect for breakfast or late-night snacking.',
-    price: 3500,
-    originalPrice: 4200,
-    stockQuantity: 20,
-    category: 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1509365390695-33aee754301f?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.8,
-    reviews: 28,
-    badge: 'Warm & Fresh 🍥',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-10',
-    storeId: 'store-1',
-    storeName: 'Sweet Tooth Bakes',
-    name: 'Banana Bread Loaf (Whole)',
-    description: 'Moist banana bread with walnuts and a hint of vanilla. Homemade in the hostel kitchen.',
-    price: 3000,
-    originalPrice: 3800,
-    stockQuantity: 12,
-    category: 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1605090930601-03c155cfa11b?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.7,
-    reviews: 19,
-    badge: 'Homemade 🏠',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-11',
-    storeId: 'store-2',
-    storeName: 'Campus Tech Plug',
-    name: 'USB-C Hub 7-in-1 Adapter',
-    description: 'Multi-port USB-C hub with HDMI, USB 3.0, SD card reader. Perfect for lecture hall presentations.',
-    price: 15000,
-    originalPrice: 19000,
-    stockQuantity: 8,
-    category: 'tech',
-    imageUrl: 'https://images.unsplash.com/photo-1625842268584-8f3296236761?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.6,
-    reviews: 34,
-    badge: 'Study Tool 🔧',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-12',
-    storeId: 'store-2',
-    storeName: 'Campus Tech Plug',
-    name: 'LED Desk Lamp with USB Charging',
-    description: 'Adjustable LED desk lamp with 3 brightness levels and built-in USB port for phone charging.',
-    price: 8500,
-    originalPrice: 11000,
-    stockQuantity: 15,
-    category: 'tech',
-    imageUrl: 'https://images.unsplash.com/photo-1507473885765-e6ed057ab6fe?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.8,
-    reviews: 56,
-    badge: 'Night Owl 🦉',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-13',
-    storeId: 'store-3',
-    storeName: 'Campus Drip & Wear',
-    name: 'Oversized Graphic Tee — "Campus Life"',
-    description: 'Premium 300GSM cotton tee with exclusive campus-themed graphic print. Unisex fit.',
-    price: 8500,
-    originalPrice: 10000,
-    stockQuantity: 30,
-    category: 'fashion',
-    imageUrl: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.9,
-    reviews: 87,
-    badge: 'Trending 🔥',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-14',
-    storeId: 'store-3',
-    storeName: 'Campus Drip & Wear',
-    name: 'Corduroy Bucket Hat',
-    description: 'Trendy corduroy bucket hat. Available in beige, forest green, and navy. One size fits most.',
-    price: 4500,
-    originalPrice: 5500,
-    stockQuantity: 25,
-    category: 'fashion',
-    imageUrl: 'https://images.unsplash.com/photo-1588850561407-ed78c334e67a?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.7,
-    reviews: 41,
-    badge: 'Style Pick 🎩',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-15',
-    storeId: 'store-4',
-    storeName: 'Hostel Glam & Skincare',
-    name: 'Vitamin C Brightening Serum (30ml)',
-    description: 'Lightweight vitamin C serum for dark spots and uneven skin tone. Dermatologist-tested formula.',
-    price: 12000,
-    originalPrice: 15000,
-    stockQuantity: 18,
-    category: 'beauty',
-    imageUrl: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.9,
-    reviews: 72,
-    badge: 'Glow Up ✨',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-16',
-    storeId: 'store-4',
-    storeName: 'Hostel Glam & Skincare',
-    name: 'Press-On Nails Set (24 pieces)',
-    description: 'Salon-quality press-on nails in assorted designs. Includes nail glue and mini file.',
-    price: 5500,
-    originalPrice: 7000,
-    stockQuantity: 35,
-    category: 'beauty',
-    imageUrl: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.6,
-    reviews: 38,
-    badge: 'Glam Ready 💅',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-17',
-    storeId: 'store-1',
-    storeName: 'Sweet Tooth Bakes',
-    name: 'Chocolate Chip Cookies (12-Pack)',
-    description: 'Chewy double chocolate chip cookies. Made with Belgian cocoa and real butter.',
-    price: 3200,
-    originalPrice: 4000,
-    stockQuantity: 25,
-    category: 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=600&auto=format&fit=crop&q=80',
-    isBestseller: true,
-    rating: 4.9,
-    reviews: 65,
-    badge: 'Fan Favorite 🍪',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-18',
-    storeId: 'store-2',
-    storeName: 'Campus Tech Plug',
-    name: 'Laptop Stand — Adjustable Aluminum',
-    description: 'Ergonomic aluminum laptop stand with adjustable height. Fits 10-17 inch laptops.',
-    price: 12000,
-    originalPrice: 16000,
-    stockQuantity: 10,
-    category: 'tech',
-    imageUrl: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.8,
-    reviews: 29,
-    badge: 'Posture Fix 💻',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-19',
-    storeId: 'store-3',
-    storeName: 'Campus Drip & Wear',
-    name: 'Minimalist Leather Wristwatch',
-    description: 'Sleek Japanese quartz movement watch with genuine leather strap. Water-resistant 3ATM.',
-    price: 14000,
-    originalPrice: 18000,
-    stockQuantity: 8,
-    category: 'fashion',
-    imageUrl: 'https://images.unsplash.com/photo-1524592094714-0f0654e20314?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.8,
-    reviews: 33,
-    badge: 'Classic Piece ⌚',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-20',
-    storeId: 'store-4',
-    storeName: 'Hostel Glam & Skincare',
-    name: 'Lip Gloss Trio — Nude Collection',
-    description: 'Set of 3 high-shine lip glosses in nude shades. Non-sticky, moisturizing formula.',
-    price: 4800,
-    originalPrice: 6000,
-    stockQuantity: 20,
-    category: 'beauty',
-    imageUrl: 'https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.7,
-    reviews: 55,
-    badge: 'Must Have 💋',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-21',
-    storeId: 'store-2',
-    storeName: 'Campus Tech Plug',
-    name: 'Wireless Keyboard & Mouse Combo',
-    description: 'Slim 2.4GHz wireless keyboard and mouse set. Silent keys, long battery life. Great for dorms.',
-    price: 11500,
-    originalPrice: 14000,
-    stockQuantity: 12,
-    category: 'tech',
-    imageUrl: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.7,
-    reviews: 42,
-    badge: 'Dorm Setup 🖥️',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-22',
-    storeId: 'store-1',
-    storeName: 'Sweet Tooth Bakes',
-    name: 'Mini Meat Pie (10-Pack)',
-    description: 'Crispy golden crust filled with seasoned minced meat and vegetables. Perfect for sharing.',
-    price: 5000,
-    originalPrice: 6500,
-    stockQuantity: 18,
-    category: 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.8,
-    reviews: 37,
-    badge: 'Party Pack 🥧',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-23',
-    storeId: 'store-3',
-    storeName: 'Campus Drip & Wear',
-    name: 'Cargo Jogger Pants — Olive Green',
-    description: 'Relaxed fit cargo joggers with side pockets. Elastic waistband and ankle cuffs.',
-    price: 11000,
-    originalPrice: 13500,
-    stockQuantity: 16,
-    category: 'fashion',
-    imageUrl: 'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.6,
-    reviews: 26,
-    badge: 'Streetwear 🛹',
-    createdAt: new Date(),
-  },
-  {
-    id: 'prod-24',
-    storeId: 'store-4',
-    storeName: 'Hostel Glam & Skincare',
-    name: 'Facial Cleansing Brush — Silicone',
-    description: 'Gentle silicone cleansing pad for deep pore cleaning. Waterproof and travel-friendly.',
-    price: 3500,
-    originalPrice: 4500,
-    stockQuantity: 30,
-    category: 'beauty',
-    imageUrl: 'https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=80',
-    isBestseller: false,
-    rating: 4.5,
-    reviews: 21,
-    badge: 'Clean Skin 🧼',
-    createdAt: new Date(),
-  },
-];
+function presentProduct(product) {
+  return {
+    ...product,
+    storeName: product.store.storeName,
+  };
+}
 
-let orders = [
-  {
-    id: 'ORD-8421',
-    buyerId: 'user-buyer-1',
-    buyerName: 'Tobi Adebayo',
-    buyerEmail: 'tobi@student.edu.ng',
-    buyerHostel: 'Fajuyi Hall, Block 3, Room 14 (OAU)',
-    campus: 'Obafemi Awolowo University (OAU)',
-    totalAmount: 23000,
-    paymentStatus: 'ESCROW_PAID',
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-    items: [
-      {
-        id: 'item-8421-1',
-        orderId: 'ORD-8421',
-        storeId: 'store-1',
-        storeName: 'Sweet Tooth Bakes',
-        productId: 'prod-1',
-        productName: 'Red Velvet Gourmet Cupcakes (6-Pack)',
-        quantity: 1,
-        unitPrice: 4500,
-        status: 'PROCESSING', // ESCROW_PAID -> PROCESSING -> READY_FOR_PICKUP -> DELIVERED
-      },
-      {
-        id: 'item-8421-2',
-        orderId: 'ORD-8421',
-        storeId: 'store-2',
-        storeName: 'Campus Tech Plug',
-        productId: 'prod-3',
-        productName: 'ANC Noise-Canceling Wireless Earbuds',
-        quantity: 1,
-        unitPrice: 18500,
-        status: 'READY_FOR_PICKUP',
-      }
-    ]
-  }
-];
+function presentOrder(order) {
+  return {
+    ...order,
+    buyerName: order.buyer.fullName,
+    buyerEmail: order.buyer.email,
+    items: order.orderItems.map((item) => ({
+      ...item,
+      storeName: item.store.storeName,
+      productName: item.product.name,
+    })),
+  };
+}
 
-let orderItems = [];
-orders.forEach(o => {
-  o.items.forEach(it => orderItems.push(it));
-});
+function sendError(res, error, status = 500) {
+  if (status >= 500) console.error(error);
+  return res.status(status).json({ error });
+}
 
-// Middleware
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) {
-    req.user = users[0];
-    return next();
-  }
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-};
+function authenticateToken(req, res, next) {
+  const token = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token) return res.status(401).json({ error: 'Authentication is required.' });
 
-// --- API ENDPOINTS ---
-
-// 1. Auth: Register
-app.post('/api/v1/auth/register', async (req, res) => {
   try {
-    const { fullName, email, password, role, campus } = req.body;
-    const existing = users.find((u) => u.email === email);
-    if (existing) return res.status(400).json({ error: 'Email already registered' });
-
-    const passwordHash = await bcrypt.hash(password || 'password123', 10);
-    const newUser = {
-      id: `user-${Date.now()}`,
-      fullName,
-      email,
-      passwordHash,
-      role: role || 'BUYER',
-      campus: campus || 'Obafemi Awolowo University (OAU)',
-      createdAt: new Date(),
-    };
-    users.push(newUser);
-
-    const token = jwt.sign({ id: newUser.id, email: newUser.email, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user: { id: newUser.id, fullName: newUser.fullName, email: newUser.email, role: newUser.role, campus: newUser.campus } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 2. Auth: Login
-app.post('/api/v1/auth/login', async (req, res) => {
-  try {
-    const { email } = req.body;
-    const user = users.find((u) => u.email === email) || users[0];
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role, campus: user.campus } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 3. Stores: Get all active storefronts
-app.get('/api/v1/stores', (req, res) => {
-  res.json(stores);
-});
-
-// 4. Stores: Create new student storefront
-app.post('/api/v1/stores', authenticateToken, (req, res) => {
-  const { storeName, description, tagline, category, location, whatsApp, banner, avatar } = req.body;
-  const newStore = {
-    id: `store-${Date.now()}`,
-    vendorId: req.user.id,
-    vendorName: req.user.fullName || 'Student Vendor',
-    storeName,
-    slug: storeName.toLowerCase().replace(/\s+/g, '-'),
-    tagline: tagline || 'Quality student goods delivered right to your hostel!',
-    description: description || 'Verified student-run business.',
-    category: category || 'pastry',
-    avatar: avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    banner: banner || 'https://images.unsplash.com/photo-1517433670267-08bbd4be890f?w=1000&auto=format&fit=crop&q=80',
-    rating: 5.0,
-    reviewsCount: 1,
-    deliveryTime: '15-25 mins',
-    location: location || 'Campus SUB Block',
-    verified: true,
-    badge: 'Campus Verified Vendor 🛡️',
-    whatsApp: whatsApp || '+2348000000000',
-    createdAt: new Date(),
-  };
-  stores.unshift(newStore);
-  res.status(201).json(newStore);
-});
-
-// 5. Products: Get catalog
-app.get('/api/v1/products', (req, res) => {
-  const { store_id, category, search } = req.query;
-  let result = products;
-  if (store_id) result = result.filter((p) => p.storeId === store_id);
-  if (category && category !== 'all') result = result.filter((p) => p.category === category);
-  if (search) {
-    const q = search.toLowerCase();
-    result = result.filter((p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q) || p.storeName.toLowerCase().includes(q));
-  }
-  res.json(result);
-});
-
-// 6. Products: Add product
-app.post('/api/v1/products', authenticateToken, (req, res) => {
-  const { storeId, storeName, name, description, price, originalPrice, stockQuantity, imageUrl, category, badge } = req.body;
-  const newProduct = {
-    id: `prod-${Date.now()}`,
-    storeId: storeId || stores[0].id,
-    storeName: storeName || stores[0].storeName,
-    name,
-    description: description || '',
-    price: parseFloat(price),
-    originalPrice: originalPrice ? parseFloat(originalPrice) : null,
-    stockQuantity: parseInt(stockQuantity, 10) || 10,
-    imageUrl: imageUrl || 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=600&auto=format&fit=crop&q=80',
-    category: category || 'pastry',
-    isBestseller: false,
-    rating: 5.0,
-    reviews: 1,
-    badge: badge || 'New Arrival ✨',
-    createdAt: new Date(),
-  };
-  products.unshift(newProduct);
-  res.status(201).json(newProduct);
-});
-
-// 7. Orders: Multi-Vendor Order Splitting Checkout
-app.post('/api/v1/orders/checkout', authenticateToken, (req, res) => {
-  const { cartItems, totalAmount, buyerHostel, buyerName, buyerEmail, campus } = req.body;
-  if (!cartItems || cartItems.length === 0) {
-    return res.status(400).json({ error: 'Cart is empty' });
+    req.auth = jwt.verify(token, JWT_SECRET);
+  } catch {
+    return res.status(401).json({ error: 'Your session is invalid or expired. Please sign in again.' });
   }
 
-  const parentOrderId = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-  
-  // Create split items for each vendor
-  const splitItems = cartItems.map((item, idx) => {
-    const orderItem = {
-      id: `item-${Date.now()}-${idx}`,
-      orderId: parentOrderId,
-      storeId: item.storeId,
-      storeName: item.storeName || 'Campus Store',
-      productId: item.id,
-      productName: item.name,
-      quantity: item.quantity,
-      unitPrice: item.price,
-      status: 'ESCROW_PAID', // Escrow protected: funds held safely until delivery
-    };
-    orderItems.unshift(orderItem);
-    return orderItem;
+  prisma.user.findUnique({ where: { id: req.auth.id } })
+    .then((user) => {
+      if (!user) return res.status(401).json({ error: 'Account no longer exists.' });
+      req.user = user;
+      return next();
+    })
+    .catch((error) => sendError(res, error));
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Administrator access is required.' });
+  }
+  return next();
+}
+
+function requireVendor(req, res, next) {
+  if (!['VENDOR', 'ADMIN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'A vendor account is required.' });
+  }
+  return next();
+}
+
+async function verifyPaystackTransaction(reference, expectedOrder) {
+  if (!process.env.PAYSTACK_SECRET_KEY) {
+    throw new Error('Paystack is not configured. Set PAYSTACK_SECRET_KEY on the server.');
+  }
+
+  const response = await fetch(
+    `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+    { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } },
+  );
+  const result = await response.json();
+  if (!response.ok || !result.status) {
+    throw new Error(result.message || 'Paystack could not verify this transaction.');
+  }
+
+  const transaction = result.data;
+  if (
+    transaction.status !== 'success' ||
+    transaction.reference !== reference ||
+    transaction.amount !== Math.round(expectedOrder.totalAmount * 100) ||
+    transaction.currency !== 'NGN' ||
+    transaction.metadata?.orderId !== expectedOrder.id
+  ) {
+    throw new Error('Payment verification did not match the pending order.');
+  }
+  return transaction;
+}
+
+async function markOrderPaid(reference, transaction) {
+  const orderId = transaction.metadata.orderId;
+  const order = await prisma.orders.findFirst({
+    where: { id: orderId, paymentReference: reference },
   });
+  if (!order) throw new Error('No order matches the verified payment reference.');
 
-  const parentOrder = {
-    id: parentOrderId,
-    buyerId: req.user?.id || 'user-buyer-1',
-    buyerName: buyerName || req.user?.fullName || 'Tobi Adebayo',
-    buyerEmail: buyerEmail || req.user?.email || 'tobi@student.edu.ng',
-    buyerHostel: buyerHostel || 'Fajuyi Hall, Block 3, Room 14',
-    campus: campus || 'Obafemi Awolowo University (OAU)',
-    totalAmount: parseFloat(totalAmount),
-    paymentStatus: 'ESCROW_PAID',
-    createdAt: new Date().toISOString(),
-    items: splitItems,
-  };
-
-  orders.unshift(parentOrder);
-
-  res.status(201).json({
-    message: 'Unified order processed with escrow protection and split across vendor sub-orders.',
-    order: parentOrder,
-  });
-});
-
-// 8. Orders: Buyer order history
-app.get('/api/v1/orders/my-orders', authenticateToken, (req, res) => {
-  res.json(orders);
-});
-
-// 9. Vendor: Get incoming sub-orders
-app.get('/api/v1/vendor/orders', authenticateToken, (req, res) => {
-  const vendorStoreId = req.query.storeId || 'store-1';
-  const incoming = orderItems.filter((item) => item.storeId === vendorStoreId);
-  res.json(incoming);
-});
-
-// 10. Vendor: Update order item status in state machine
-app.patch('/api/v1/vendor/orders/:id/status', authenticateToken, (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
-
-  let found = false;
-  // Update in orderItems list
-  orderItems = orderItems.map((item) => {
-    if (item.id === id) {
-      found = true;
-      return { ...item, status };
-    }
-    return item;
-  });
-
-  // Also update in parent orders array
-  orders = orders.map((order) => {
-    const updatedItems = order.items.map((item) => {
-      if (item.id === id) {
-        return { ...item, status };
-      }
-      return item;
+  if (order.paymentStatus !== 'PAID') {
+    await prisma.orders.updateMany({
+      where: { id: order.id, paymentStatus: 'PENDING' },
+      data: { paymentStatus: 'PAID' },
     });
-    return { ...order, items: updatedItems };
-  });
+  }
 
-  res.json({ message: 'Sub-order status updated', id, status });
+  return prisma.orders.findUnique({
+    where: { id: order.id },
+    include: { buyer: true, orderItems: { include: { store: true, product: true } } },
+  });
+}
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter(_req, file, callback) {
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)) {
+      return callback(new Error('Upload a JPG, PNG, WEBP, or GIF image.'));
+    }
+    return callback(null, true);
+  },
 });
 
-// Health endpoint
-app.get('/api/v1/health', (req, res) => {
-  res.json({ status: 'OK', storesCount: stores.length, productsCount: products.length, ordersCount: orders.length });
+app.post('/api/v1/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const signature = req.headers['x-paystack-signature'];
+  if (!signature || !process.env.PAYSTACK_SECRET_KEY) {
+    return res.status(401).json({ error: 'Paystack signature could not be verified.' });
+  }
+
+  const expectedSignature = crypto
+    .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
+    .update(req.body)
+    .digest('hex');
+  const received = Buffer.from(signature);
+  const expected = Buffer.from(expectedSignature);
+  if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
+    return res.status(401).json({ error: 'Invalid Paystack signature.' });
+  }
+
+  try {
+    const event = JSON.parse(req.body.toString('utf8'));
+    if (event.event !== 'charge.success') return res.sendStatus(200);
+    const reference = event.data?.reference;
+    if (!reference) return res.status(400).json({ error: 'Payment reference is missing.' });
+    const order = await prisma.orders.findFirst({ where: { paymentReference: reference } });
+    if (!order) return res.status(404).json({ error: 'Order for this payment was not found.' });
+    const verified = await verifyPaystackTransaction(reference, order);
+    await markOrderPaid(reference, verified);
+    return res.sendStatus(200);
+  } catch (error) {
+    return sendError(res, error, 400);
+  }
+});
+
+app.use(express.json({ limit: '1mb' }));
+
+app.post('/api/v1/auth/register', async (req, res) => {
+  const { fullName, email, password, role = 'BUYER' } = req.body;
+  if (typeof fullName !== 'string' || !fullName.trim()) {
+    return res.status(400).json({ error: 'Full name is required.' });
+  }
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'A valid email address is required.' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+  if (!['BUYER', 'VENDOR'].includes(role)) {
+    return res.status(400).json({ error: 'Choose either a buyer or vendor account.' });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await prisma.user.create({
+      data: { fullName: fullName.trim(), email: email.trim().toLowerCase(), passwordHash, role },
+    });
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    return res.status(201).json({ token, user: safeUser(user) });
+  } catch (error) {
+    if (error.code === 'P2002') return res.status(409).json({ error: 'An account with this email already exists.' });
+    return sendError(res, error);
+  }
+});
+
+app.post('/api/v1/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      return res.status(401).json({ error: 'Email or password is incorrect.' });
+    }
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    return res.json({ token, user: safeUser(user) });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.get('/api/v1/auth/me', authenticateToken, (req, res) => {
+  res.json(safeUser(req.user));
+});
+
+app.get('/api/v1/stores', async (_req, res) => {
+  try {
+    const stores = await prisma.stores.findMany({
+      include: { vendor: { select: { fullName: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json(stores.map(presentStore));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.post('/api/v1/stores', authenticateToken, async (req, res) => {
+  const { storeName, description, tagline, category, location, whatsApp, banner, avatar } = req.body;
+  if (typeof storeName !== 'string' || !storeName.trim()) {
+    return res.status(400).json({ error: 'Store name is required.' });
+  }
+
+  try {
+    const [store, user] = await prisma.$transaction([
+      prisma.stores.create({
+        data: {
+          vendorId: req.user.id,
+          storeName: storeName.trim(),
+          description: description || null,
+          tagline: tagline || null,
+          category: category || null,
+          location: location || null,
+          whatsApp: whatsApp || null,
+          banner: banner || DEFAULT_BANNER,
+          avatar: avatar || DEFAULT_AVATAR,
+        },
+        include: { vendor: { select: { fullName: true } } },
+      }),
+      prisma.user.update({ where: { id: req.user.id }, data: { role: 'VENDOR' } }),
+    ]);
+    return res.status(201).json({ store: presentStore(store), user: safeUser(user) });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.get('/api/v1/products', async (req, res) => {
+  const { store_id: storeId, category, search } = req.query;
+  try {
+    const products = await prisma.products.findMany({
+      where: {
+        ...(storeId ? { storeId: String(storeId) } : {}),
+        ...(category && category !== 'all' ? { category: String(category) } : {}),
+      },
+      include: { store: { select: { storeName: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const normalizedSearch = typeof search === 'string' ? search.toLowerCase() : '';
+    return res.json(products
+      .filter((product) => !normalizedSearch || [
+        product.name,
+        product.description || '',
+        product.store.storeName,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch)))
+      .map(presentProduct));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.post('/api/v1/products', authenticateToken, requireVendor, async (req, res) => {
+  const { storeId, name, description, price, originalPrice, stockQuantity, imageUrl, category, badge } = req.body;
+  if (typeof name !== 'string' || !name.trim() || !Number.isFinite(Number(price)) || Number(price) <= 0) {
+    return res.status(400).json({ error: 'Product name and a valid price are required.' });
+  }
+  if (!Number.isInteger(Number(stockQuantity)) || Number(stockQuantity) < 0) {
+    return res.status(400).json({ error: 'Stock quantity must be a non-negative whole number.' });
+  }
+
+  try {
+    const store = await prisma.stores.findFirst({
+      where: { id: storeId, ...(req.user.role === 'ADMIN' ? {} : { vendorId: req.user.id }) },
+    });
+    if (!store) return res.status(404).json({ error: 'The store was not found or is not yours.' });
+
+    const product = await prisma.products.create({
+      data: {
+        storeId: store.id,
+        name: name.trim(),
+        description: description || null,
+        price: Number(price),
+        originalPrice: originalPrice === '' || originalPrice == null ? null : Number(originalPrice),
+        stockQuantity: Number(stockQuantity),
+        imageUrl: imageUrl || null,
+        category: category || store.category,
+        badge: badge || null,
+      },
+      include: { store: { select: { storeName: true } } },
+    });
+    return res.status(201).json(presentProduct(product));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.post('/api/v1/uploads', authenticateToken, (req, res) => {
+  if (!cloudinaryConfigured) {
+    return res.status(503).json({ error: 'Image uploads are not configured. Set the Cloudinary environment variables.' });
+  }
+
+  upload.single('image')(req, res, (uploadError) => {
+    if (uploadError) return res.status(400).json({ error: uploadError.message });
+    if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' });
+
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: 'newmarket', resource_type: 'image' },
+      (error, result) => {
+        if (error) return sendError(res, error);
+        return res.status(201).json({ url: result.secure_url });
+      },
+    );
+    stream.end(req.file.buffer);
+  });
+});
+
+app.post('/api/v1/orders/checkout', authenticateToken, async (req, res) => {
+  const { cartItems, buyerHostel, campus } = req.body;
+  if (!Array.isArray(cartItems) || cartItems.length === 0) {
+    return res.status(400).json({ error: 'Your cart is empty.' });
+  }
+
+  const requestedItems = new Map();
+  for (const item of cartItems) {
+    if (
+      typeof item?.id !== 'string' ||
+      !Number.isInteger(Number(item.quantity)) ||
+      Number(item.quantity) < 1
+    ) {
+      return res.status(400).json({ error: 'Each cart item must include a product and a positive whole-number quantity.' });
+    }
+    requestedItems.set(item.id, (requestedItems.get(item.id) || 0) + Number(item.quantity));
+  }
+
+  if (!process.env.PAYSTACK_SECRET_KEY) {
+    return res.status(503).json({ error: 'Payments are not configured. Set PAYSTACK_SECRET_KEY on the server.' });
+  }
+
+  try {
+    const products = await prisma.products.findMany({
+      where: { id: { in: [...requestedItems.keys()] } },
+      include: { store: true },
+    });
+    if (products.length !== requestedItems.size) {
+      return res.status(400).json({ error: 'One or more cart products are no longer available.' });
+    }
+    for (const product of products) {
+      if (requestedItems.get(product.id) > product.stockQuantity) {
+        return res.status(409).json({ error: `${product.name} does not have enough stock.` });
+      }
+    }
+
+    const reference = `NM-${crypto.randomUUID()}`;
+    const subtotal = products.reduce(
+      (sum, product) => sum + product.price * requestedItems.get(product.id),
+      0,
+    );
+    const order = await prisma.orders.create({
+      data: {
+        buyerId: req.user.id,
+        totalAmount: subtotal + SERVICE_FEE,
+        paymentStatus: 'PENDING',
+        paymentReference: reference,
+        paymentProvider: 'PAYSTACK',
+        buyerHostel: buyerHostel || null,
+        campus: campus || req.user.campus || null,
+        orderItems: {
+          create: products.map((product) => ({
+            storeId: product.storeId,
+            productId: product.id,
+            quantity: requestedItems.get(product.id),
+            unitPrice: product.price,
+          })),
+        },
+      },
+      include: { buyer: true, orderItems: { include: { store: true, product: true } } },
+    });
+
+    const callbackUrl = process.env.PAYSTACK_CALLBACK_URL || 'http://localhost:3000/payment/callback';
+    const paymentResponse = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: req.user.email,
+        amount: Math.round(order.totalAmount * 100),
+        currency: 'NGN',
+        reference,
+        callback_url: callbackUrl,
+        metadata: { orderId: order.id },
+      }),
+    });
+    const payment = await paymentResponse.json();
+    if (!paymentResponse.ok || !payment.status || !payment.data?.authorization_url) {
+      await prisma.$transaction([
+        prisma.orderItems.deleteMany({ where: { orderId: order.id } }),
+        prisma.orders.delete({ where: { id: order.id } }),
+      ]);
+      return res.status(502).json({ error: payment.message || 'Could not initialize the Paystack transaction.' });
+    }
+    return res.status(201).json({
+      order: presentOrder(order),
+      authorizationUrl: payment.data.authorization_url,
+      reference,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.get('/api/v1/payments/verify/:reference', authenticateToken, async (req, res) => {
+  try {
+    const order = await prisma.orders.findFirst({
+      where: { paymentReference: req.params.reference, buyerId: req.user.id },
+    });
+    if (!order) return res.status(404).json({ error: 'Payment reference was not found.' });
+    const transaction = await verifyPaystackTransaction(req.params.reference, order);
+    const verifiedOrder = await markOrderPaid(req.params.reference, transaction);
+    return res.json({ order: presentOrder(verifiedOrder) });
+  } catch (error) {
+    return sendError(res, error, 400);
+  }
+});
+
+app.get('/api/v1/orders/my-orders', authenticateToken, async (req, res) => {
+  try {
+    const orders = await prisma.orders.findMany({
+      where: { buyerId: req.user.id },
+      include: { buyer: true, orderItems: { include: { store: true, product: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json(orders.map(presentOrder));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.get('/api/v1/vendor/orders', authenticateToken, requireVendor, async (req, res) => {
+  try {
+    const store = await prisma.stores.findFirst({
+      where: {
+        ...(typeof req.query.storeId === 'string' ? { id: req.query.storeId } : {}),
+        ...(req.user.role === 'ADMIN' ? {} : { vendorId: req.user.id }),
+      },
+    });
+    if (!store) return res.status(404).json({ error: 'No vendor store was found.' });
+    const items = await prisma.orderItems.findMany({
+      where: { storeId: store.id, order: { paymentStatus: 'PAID' } },
+      include: { order: { include: { buyer: true } }, store: true, product: true },
+      orderBy: { order: { createdAt: 'desc' } },
+    });
+    return res.json(items.map((item) => ({
+      ...item,
+      buyerName: item.order.buyer.fullName,
+      buyerEmail: item.order.buyer.email,
+      buyerHostel: item.order.buyerHostel,
+      paymentStatus: item.order.paymentStatus,
+      storeName: item.store.storeName,
+      productName: item.product.name,
+    })));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.patch('/api/v1/vendor/orders/:id/status', authenticateToken, requireVendor, async (req, res) => {
+  const allowedStatuses = ['PROCESSING', 'READY_FOR_PICKUP', 'DELIVERED', 'CANCELLED'];
+  if (!allowedStatuses.includes(req.body.status)) {
+    return res.status(400).json({ error: 'Choose a valid fulfillment status.' });
+  }
+
+  try {
+    const item = await prisma.orderItems.findUnique({
+      where: { id: req.params.id },
+      include: { store: true, order: true },
+    });
+    if (!item || (req.user.role !== 'ADMIN' && item.store.vendorId !== req.user.id)) {
+      return res.status(404).json({ error: 'Order item was not found in your store.' });
+    }
+    if (item.order.paymentStatus !== 'PAID') {
+      return res.status(409).json({ error: 'Order fulfillment can start only after payment is verified.' });
+    }
+    const updated = await prisma.orderItems.update({
+      where: { id: item.id },
+      data: { status: req.body.status },
+      include: { store: true, product: true },
+    });
+    return res.json({
+      ...updated,
+      storeName: updated.store.storeName,
+      productName: updated.product.name,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.get('/api/v1/admin/overview', authenticateToken, requireAdmin, async (_req, res) => {
+  try {
+    const [users, stores, products, orders, recentOrders] = await Promise.all([
+      prisma.user.count(),
+      prisma.stores.count(),
+      prisma.products.count(),
+      prisma.orders.count(),
+      prisma.orders.findMany({
+        take: 10,
+        include: { buyer: { select: { fullName: true, email: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+    return res.json({
+      totals: { users, stores, products, orders },
+      recentOrders: recentOrders.map((order) => ({
+        id: order.id,
+        buyerName: order.buyer.fullName,
+        buyerEmail: order.buyer.email,
+        totalAmount: order.totalAmount,
+        paymentStatus: order.paymentStatus,
+        createdAt: order.createdAt,
+      })),
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.get('/api/v1/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.json({ status: 'ok', database: 'connected' });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.use((error, _req, res, _next) => {
+  return sendError(res, error);
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 NewMarket Express API running on http://localhost:${PORT}`);
+  console.log(`NewMarket API listening on port ${PORT}`);
 });

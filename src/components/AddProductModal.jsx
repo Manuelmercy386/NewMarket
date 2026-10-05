@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, PlusCircle, Sparkles } from 'lucide-react';
+import { api } from '../services/api';
 
 export const AddProductModal = ({ isOpen, onClose, store, onProductAdded }) => {
   const [formData, setFormData] = useState({
@@ -9,32 +10,40 @@ export const AddProductModal = ({ isOpen, onClose, store, onProductAdded }) => {
     originalPrice: '',
     stockQuantity: '15',
     category: store?.category || 'pastry',
-    imageUrl: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=600&auto=format&fit=crop&q=80',
+    imageUrl: '',
     badge: 'Fresh Batch 🌟',
   });
+  const [imageFile, setImageFile] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+    const imageUrl = imageFile ? (await api.uploadImage(imageFile)).url : formData.imageUrl;
     const newProduct = {
-      id: `prod-${Date.now()}`,
-      storeId: store?.id || 'store-1',
-      storeName: store?.storeName || 'My Student Store',
+      storeId: store?.id,
       name: formData.name,
       description: formData.description,
       price: parseFloat(formData.price),
       originalPrice: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
       stockQuantity: parseInt(formData.stockQuantity, 10),
       category: formData.category,
-      imageUrl: formData.imageUrl,
-      rating: 5.0,
-      reviews: 1,
+      imageUrl,
       badge: formData.badge,
     };
 
-    onProductAdded(newProduct);
+    await onProductAdded(newProduct);
     onClose();
+    } catch (requestError) {
+    setError(requestError.message);
+    } finally {
+    setSubmitting(false);
+    }
   };
 
   return (
@@ -117,15 +126,24 @@ export const AddProductModal = ({ isOpen, onClose, store, onProductAdded }) => {
           </div>
 
           <div>
-            <label className="text-slate-700 font-bold block mb-1">Image URL</label>
+            <label className="text-slate-700 font-bold block mb-1">Product image</label>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium"
+            />
+            {imageFile && <p className="mt-1 text-[11px] text-slate-500">{imageFile.name}</p>}
+            <label className="text-slate-700 font-bold block mb-1 mt-3">Or image URL</label>
             <input 
-              type="text" 
+              type="url"
               value={formData.imageUrl}
               onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:border-[#395082] focus:outline-none"
             />
           </div>
 
+          {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2.5 text-red-700">{error}</p>}
           <div className="pt-2 flex justify-end gap-3">
             <button
               type="button"
@@ -136,10 +154,11 @@ export const AddProductModal = ({ isOpen, onClose, store, onProductAdded }) => {
             </button>
             <button
               type="submit"
+              disabled={submitting}
               className="px-6 py-2.5 rounded-xl bg-[#395082] hover:bg-[#2c3f68] text-white font-extrabold shadow-sm flex items-center gap-1.5 transition"
             >
               <Sparkles className="w-4 h-4" />
-              <span>Publish Product</span>
+              <span>{submitting ? 'Publishing…' : 'Publish Product'}</span>
             </button>
           </div>
         </form>

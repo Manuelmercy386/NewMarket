@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useCart } from '../context/CartContext';
+import { api } from '../services/api';
 import { 
   Store, 
   Layers, 
@@ -12,41 +12,58 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-export const VendorDashboardPage = ({ store, products, onAddProductClick }) => {
+export const VendorDashboardPage = ({ store, products, onAddProductClick, onRegisterStoreClick }) => {
   const { user } = useAuth();
-  const { orders, updateOrderItemStatus } = useCart();
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [vendorSubOrders, setVendorSubOrders] = useState([]);
+  const [error, setError] = useState('');
+  const vendorStoreId = store?.id;
 
-  const vendorStoreId = store?.id || 'store-1';
-  
-  // Extract all sub-order items for this vendor
-  const vendorSubOrders = [];
-  orders.forEach((order) => {
-    order.items.forEach((item) => {
-      if (item.storeId === vendorStoreId) {
-        vendorSubOrders.push({
-          parentOrderId: order.id,
-          buyerName: order.buyerName,
-          buyerHostel: order.buyerHostel,
-          orderDate: order.createdAt,
-          ...item
-        });
-      }
-    });
-  });
+  useEffect(() => {
+    if (!vendorStoreId) {
+      setVendorSubOrders([]);
+      return;
+    }
+    api.getVendorOrders()
+      .then((items) => setVendorSubOrders(items.map((item) => ({ ...item, parentOrderId: item.orderId }))))
+      .catch((requestError) => setError(requestError.message));
+  }, [vendorStoreId]);
 
   const filteredItems = vendorSubOrders.filter((item) => {
     if (filterStatus === 'ALL') return true;
     return item.status === filterStatus;
   });
 
-  const totalEarnings = vendorSubOrders.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const totalEarnings = vendorSubOrders
+    .filter((item) => item.paymentStatus === 'PAID')
+    .reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
-  const handleStatusChange = (orderId, itemId, newStatus) => {
-    updateOrderItemStatus(orderId, itemId, newStatus);
+  const handleStatusChange = async (_orderId, itemId, newStatus) => {
+    setError('');
+    try {
+      const updatedItem = await api.updateOrderStatus(itemId, newStatus);
+      setVendorSubOrders((items) => items.map((item) => (
+        item.id === itemId ? { ...item, ...updatedItem } : item
+      )));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
   };
 
   const formatPrice = (val) => `₦${Number(val).toLocaleString()}`;
+
+  if (!store) {
+    return (
+      <section className="rounded-3xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+        <Store className="mx-auto h-10 w-10 text-[#395082]" />
+        <h1 className="mt-4 text-xl font-extrabold text-slate-900">Set up your storefront</h1>
+        <p className="mt-2 text-sm text-slate-500">Create a store before listing products or managing orders.</p>
+        <button onClick={onRegisterStoreClick} className="mt-5 rounded-xl bg-[#395082] px-5 py-3 text-xs font-extrabold text-white">
+          Create my store
+        </button>
+      </section>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -55,19 +72,19 @@ export const VendorDashboardPage = ({ store, products, onAddProductClick }) => {
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <img 
-            src={store?.avatar || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=150&auto=format&fit=crop&q=80'} 
-            alt={store?.storeName}
+            src={store.avatar || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=150&auto=format&fit=crop&q=80'}
+            alt={store.storeName}
             className="w-16 h-16 rounded-2xl object-cover ring-2 ring-slate-200"
           />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">{store?.storeName || 'Sweet Tooth Bakes'}</h1>
+              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">{store.storeName}</h1>
               <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-green-100 text-[#1b9e4b]">
                 VERIFIED STORE
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Owner: <strong className="text-slate-800">{user?.fullName}</strong> ({store?.location})
+              Owner: <strong className="text-slate-800">{user?.fullName}</strong> ({store.location})
             </p>
           </div>
         </div>
@@ -91,7 +108,7 @@ export const VendorDashboardPage = ({ store, products, onAddProductClick }) => {
           <p className="text-2xl font-extrabold text-slate-900">{formatPrice(totalEarnings)}</p>
           <p className="text-[11px] text-[#1b9e4b] flex items-center gap-1 font-semibold">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Escrow Protected Earnings</span>
+            <span>Verified paid order value</span>
           </p>
         </div>
 
@@ -120,6 +137,7 @@ export const VendorDashboardPage = ({ store, products, onAddProductClick }) => {
 
       {/* Incoming Sub-Orders Queue & State Machine Controller */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-6">
+        {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{error}</p>}
         
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
           <div>
@@ -132,7 +150,7 @@ export const VendorDashboardPage = ({ store, products, onAddProductClick }) => {
 
           {/* Status Filter Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-            {['ALL', 'ESCROW_PAID', 'PROCESSING', 'READY_FOR_PICKUP', 'DELIVERED'].map((st) => (
+            {['ALL', 'PENDING', 'PROCESSING', 'READY_FOR_PICKUP', 'DELIVERED'].map((st) => (
               <button
                 key={st}
                 onClick={() => setFilterStatus(st)}
@@ -183,9 +201,10 @@ export const VendorDashboardPage = ({ store, products, onAddProductClick }) => {
                   <select
                     value={subOrder.status}
                     onChange={(e) => handleStatusChange(subOrder.parentOrderId, subOrder.id, e.target.value)}
+                    disabled={subOrder.paymentStatus !== 'PAID'}
                     className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-[#395082] focus:outline-none focus:ring-1 focus:ring-[#395082]"
                   >
-                    <option value="ESCROW_PAID">ESCROW PAID</option>
+                    <option value="PENDING">PENDING PAYMENT</option>
                     <option value="PROCESSING">PROCESSING</option>
                     <option value="READY_FOR_PICKUP">READY FOR PICKUP</option>
                     <option value="DELIVERED">DELIVERED</option>

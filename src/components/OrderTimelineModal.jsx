@@ -2,10 +2,10 @@ import React from 'react';
 import { X, CheckCircle, Clock, PackageCheck, Store, ShieldCheck } from 'lucide-react';
 
 const STATUS_STEPS = [
-  { key: 'PAID', label: 'Payment Confirmed', icon: ShieldCheck, desc: 'Payment received successfully. Sub-orders dispatched to vendors.' },
+  { key: 'PAID', label: 'Payment Confirmed', icon: ShieldCheck, desc: 'Paystack confirmed the payment. Vendor sub-orders can now be fulfilled.' },
   { key: 'PROCESSING', label: 'Preparing Order', icon: Clock, desc: 'Student vendor is preparing your order in hostel/shop.' },
   { key: 'READY_FOR_PICKUP', label: 'Out for Delivery / Pickup', icon: PackageCheck, desc: 'Order is with campus courier or ready at pickup point.' },
-  { key: 'DELIVERED', label: 'Delivered & Complete', icon: CheckCircle, desc: 'Delivered to your hostel room. Funds released to vendor.' },
+  { key: 'DELIVERED', label: 'Delivered & Complete', icon: CheckCircle, desc: 'Your order has been marked delivered.' },
 ];
 
 export const OrderTimelineModal = ({ order, onClose }) => {
@@ -30,7 +30,7 @@ export const OrderTimelineModal = ({ order, onClose }) => {
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-green-50 text-[#1b9e4b] border border-green-200 flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Escrow Protected State Machine</span>
+              <span>Payment & Fulfillment Status</span>
             </span>
             <span className="text-xs text-slate-500 font-mono font-bold">{order.id}</span>
           </div>
@@ -43,8 +43,9 @@ export const OrderTimelineModal = ({ order, onClose }) => {
         {/* Multi-Vendor Sub-Orders Breakdown */}
         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
           {order.items.map((subItem) => {
-            const currentStepIdx = STATUS_STEPS.findIndex(s => s.key === subItem.status);
-            const activeStepIndex = currentStepIdx === -1 ? 0 : currentStepIdx;
+            const isPaid = order.paymentStatus === 'PAID';
+            const currentStepIdx = STATUS_STEPS.findIndex((step) => step.key === subItem.status);
+            const activeStepIndex = isPaid ? Math.max(0, currentStepIdx) : -1;
 
             return (
               <div key={subItem.id} className="bg-slate-50/70 rounded-2xl p-4 sm:p-5 border border-slate-200/90 space-y-4">
@@ -72,8 +73,8 @@ export const OrderTimelineModal = ({ order, onClose }) => {
                 {/* Horizontal Stepper Timeline */}
                 <div className="grid grid-cols-4 gap-2 pt-1">
                   {STATUS_STEPS.map((step, idx) => {
-                    const isCompleted = idx <= activeStepIndex;
-                    const isCurrent = idx === activeStepIndex;
+                    const isCompleted = isPaid && idx <= activeStepIndex;
+                    const isCurrent = isPaid ? idx === activeStepIndex : idx === 0;
 
                     return (
                       <div key={step.key} className="flex flex-col items-center text-center space-y-1.5">
@@ -86,7 +87,7 @@ export const OrderTimelineModal = ({ order, onClose }) => {
                         </div>
 
                         <span className={`text-[10px] font-bold leading-tight ${isCurrent ? 'text-[#395082]' : isCompleted ? 'text-slate-800' : 'text-slate-400'}`}>
-                          {step.label}
+                          {idx === 0 && !isPaid ? 'Awaiting Payment' : step.label}
                         </span>
                       </div>
                     );
@@ -95,7 +96,7 @@ export const OrderTimelineModal = ({ order, onClose }) => {
 
                 {/* Sub-order status description */}
                 <div className="p-2.5 rounded-xl bg-white border border-slate-200 text-[11px] text-slate-600">
-                  💡 {STATUS_STEPS[activeStepIndex]?.desc}
+                  💡 {isPaid ? STATUS_STEPS[activeStepIndex]?.desc : 'Order fulfillment starts after Paystack confirms payment.'}
                 </div>
 
               </div>

@@ -11,7 +11,6 @@ import {
   PlusCircle, 
   ChevronDown,
   Layers,
-  ShieldCheck,
   Compass
 } from 'lucide-react';
 
@@ -29,10 +28,12 @@ export const Navbar = ({
   activeView, 
   setActiveView,
   onOpenRegisterStore,
+  onNavigate,
+  hasVendorStore,
   selectedCampus,
   setSelectedCampus
 }) => {
-  const { user, logout, switchMockUser } = useAuth();
+  const { user, logout } = useAuth();
   const { cart, setIsCartOpen, orders } = useCart();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [campusDropdownOpen, setCampusDropdownOpen] = useState(false);
@@ -124,7 +125,7 @@ export const Navbar = ({
             </button>
 
             {/* Vendor Portal / Sell Button */}
-            {user?.role === 'VENDOR' ? (
+            {user?.role === 'VENDOR' && hasVendorStore ? (
               <button
                 onClick={() => setActiveView('vendor-dashboard')}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm ${
@@ -142,7 +143,7 @@ export const Navbar = ({
                 className="px-3.5 py-2 rounded-xl text-xs font-bold text-[#ff7e00] bg-orange-50 hover:bg-orange-100 border border-orange-200 flex items-center gap-1.5 transition"
               >
                 <PlusCircle className="w-4 h-4" />
-                <span className="hidden sm:inline">Sell on NewMarket</span>
+                <span className="hidden sm:inline">{user?.role === 'VENDOR' ? 'Set up your store' : 'Sell on NewMarket'}</span>
               </button>
             )}
 
@@ -160,14 +161,22 @@ export const Navbar = ({
               )}
             </button>
 
-            {/* User Profile Dropdown with Quick Role Switcher */}
-            <div className="relative">
+            {!user ? (
+              <div className="flex items-center gap-2">
+                <button onClick={() => onNavigate('/login')} className="rounded-xl px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                  Sign in
+                </button>
+                <button onClick={() => onNavigate('/signup')} className="rounded-xl bg-[#395082] px-3 py-2 text-xs font-bold text-white hover:bg-[#2c3f68]">
+                  Sign up
+                </button>
+              </div>
+            ) : <div className="relative">
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
                 className="flex items-center gap-2 p-1 rounded-xl hover:bg-slate-100 border border-slate-200 transition"
               >
                 <img
-                  src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
+                src={user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
                   alt={user?.fullName}
                   className="w-8 h-8 rounded-lg object-cover"
                 />
@@ -185,7 +194,7 @@ export const Navbar = ({
                           ? 'bg-blue-100 text-[#395082]' 
                           : 'bg-green-100 text-[#1b9e4b]'
                       }`}>
-                        {user?.role === 'VENDOR' ? 'STORE OWNER 🏪' : 'STUDENT BUYER 🎓'}
+                        {user.role === 'ADMIN' ? 'ADMINISTRATOR' : user.role === 'VENDOR' ? 'STORE OWNER 🏪' : 'STUDENT BUYER 🎓'}
                       </span>
                     </div>
                   </div>
@@ -215,20 +224,17 @@ export const Navbar = ({
                       </button>
                     )}
 
-                    {/* Quick Demo Switcher */}
-                    <div className="px-4 py-1.5 border-t border-slate-100 mt-1">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Switch Persona</p>
+                    {user.role === 'ADMIN' && (
                       <button
                         onClick={() => {
-                          switchMockUser(user?.role === 'VENDOR' ? 'buyer' : 'vendor1');
+                          onNavigate('/admin');
                           setDropdownOpen(false);
                         }}
-                        className="w-full text-left py-1 text-slate-700 hover:text-[#395082] flex items-center gap-2 font-medium"
+                        className="w-full text-left px-4 py-2 text-slate-700 hover:bg-slate-50"
                       >
-                        <ShieldCheck className="w-4 h-4 text-[#ff7e00]" />
-                        <span>Switch to {user?.role === 'VENDOR' ? 'Student Buyer (Tobi)' : 'Vendor (Amina - Sweet Tooth)'}</span>
+                        Platform admin
                       </button>
-                    </div>
+                    )}
                   </div>
 
                   <div className="border-t border-slate-100 pt-1">
@@ -245,7 +251,7 @@ export const Navbar = ({
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
           </div>
 

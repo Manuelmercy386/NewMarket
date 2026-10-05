@@ -1,9 +1,6 @@
-// Prisma schema for NewMarket multi-vendor campus storefront
-// Matches the exact DBML schema in the project architecture PDF
-
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -31,6 +28,8 @@ model User {
   email        String   @unique
   passwordHash String
   role         Role     @default(BUYER)
+  campus       String?
+  hostel       String?
   createdAt    DateTime @default(now())
 
   stores Stores[]
@@ -43,6 +42,7 @@ model Stores {
   storeName   String
   description String?
   category    String?
+  tagline     String?
   avatar      String?
   banner      String?
   location    String?
@@ -60,9 +60,14 @@ model Products {
   name          String
   description   String?
   price         Float
+  originalPrice Float?
   stockQuantity Int      @default(0)
   imageUrl      String?
   category      String?
+  isBestseller  Boolean  @default(false)
+  rating        Float    @default(0)
+  reviews       Int      @default(0)
+  badge         String?
   createdAt     DateTime @default(now())
 
   store      Stores       @relation(fields: [storeId], references: [id])
@@ -74,6 +79,10 @@ model Orders {
   buyerId       String
   totalAmount   Float
   paymentStatus String   @default("PENDING")
+  paymentReference String? @unique
+  paymentProvider  String?
+  buyerHostel   String?
+  campus        String?
   createdAt     DateTime @default(now())
 
   buyer      User         @relation(fields: [buyerId], references: [id])
