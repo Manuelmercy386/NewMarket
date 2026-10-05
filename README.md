@@ -41,7 +41,7 @@ NewMarket is a campus-focused multi-vendor marketplace built with React, Express
 
    The frontend is available at `http://localhost:3000`; the API listens on port `5000`.
 
-   The local database starts empty. Register as a vendor, create a storefront, and publish products to populate the marketplace.
+   The local database starts empty. `npm run server` syncs the Prisma schema before starting the API, so the database is initialized on first start. Register as a vendor, create a storefront, and publish products to populate the marketplace.
 
 ## Environment variables
 

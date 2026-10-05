@@ -80,7 +80,12 @@ function presentOrder(order) {
 
 function sendError(res, error, status = 500) {
   if (status >= 500) console.error(error);
-  return res.status(status).json({ error });
+  const message = error instanceof Error ? error.message : String(error);
+  return res.status(status).json({
+    error: status >= 500 && process.env.NODE_ENV === 'production'
+      ? 'The server could not complete the request. Check the server logs for details.'
+      : message,
+  });
 }
 
 function authenticateToken(req, res, next) {

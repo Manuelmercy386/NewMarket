@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server/index.js",
+    "server": "prisma db push && node server/index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio"
