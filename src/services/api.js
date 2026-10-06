@@ -8,9 +8,18 @@ async function request(path, options = {}) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (networkError) {
+    throw new Error('Cannot connect to the backend server. Please make sure the API server is running on port 5000 (`npm run server`).');
+  }
+
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if ((response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504) && !data.error) {
+      throw new Error('Backend server is unreachable or not running. Please start the server using `npm run server` or `npm run dev`.');
+    }
     throw new Error(data.error || `Request failed (${response.status})`);
   }
   return data;

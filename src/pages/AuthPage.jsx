@@ -88,11 +88,12 @@ export const AuthPage = ({ mode, onNavigate }) => {
             />
           </label>
           <label className="block text-xs font-bold text-slate-700">
-            Password
+            Password {isSignup && <span className="font-normal text-slate-500">(at least 8 characters)</span>}
             <input
               type="password"
               autoComplete={isSignup ? 'new-password' : 'current-password'}
               minLength={8}
+              placeholder={isSignup ? 'At least 8 characters' : ''}
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}

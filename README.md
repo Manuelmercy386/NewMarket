@@ -23,7 +23,7 @@ NewMarket is a campus-focused multi-vendor marketplace built with React, Express
    Copy-Item .env.example .env
    ```
 
-   Set a unique `JWT_SECRET` with at least 32 characters. Configure `DATABASE_URL`, Paystack, and Cloudinary values as described below. Never commit `.env` or put provider secrets in frontend code.
+   Set a unique `JWT_SECRET` with at least 32 characters to keep login sessions across restarts. In local development, the server generates a temporary random secret if none is set; users will need to sign in again after the server restarts. Production requires an explicitly configured secret. Configure Paystack and Cloudinary values as described below. Never commit `.env` or put provider secrets in frontend code.
 
 3. Generate the Prisma client and create/update the SQLite database:
 
@@ -32,12 +32,13 @@ NewMarket is a campus-focused multi-vendor marketplace built with React, Express
    npm run prisma:push
    ```
 
-4. Start the API and frontend in separate terminals:
+4. Start the application:
 
    ```powershell
-   npm run server
    npm run dev
    ```
+
+   This runs both the backend Express API (port 5000) and the Vite frontend (port 3000) concurrently. Alternatively, you can start them in separate terminals with `npm run server` and `npm run client`.
 
    The frontend is available at `http://localhost:3000`; the API listens on port `5000`.
 
@@ -47,8 +48,7 @@ NewMarket is a campus-focused multi-vendor marketplace built with React, Express
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | Prisma database URL. The local default is `file:./dev.db`. |
-| `JWT_SECRET` | Random server-only secret used to sign authentication tokens; use at least 32 characters. |
+| `JWT_SECRET` | Random server-only secret used to sign authentication tokens; use at least 32 characters. Required in production. |
 | `PORT` | Optional API port (defaults to `5000`). |
 | `PAYSTACK_SECRET_KEY` | Secret test/live API key from the Paystack dashboard. |
 | `PAYSTACK_CALLBACK_URL` | Browser return URL after checkout (defaults to `http://localhost:3000/payment/callback`). |

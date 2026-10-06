@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -13,22 +15,50 @@ dotenv.config();
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET;
+const configuredJwtSecret = process.env.JWT_SECRET;
+const isValidJwtSecret = typeof configuredJwtSecret === 'string' && configuredJwtSecret.length >= 32;
+const JWT_SECRET = isValidJwtSecret
+  ? configuredJwtSecret
+  : process.env.NODE_ENV === 'production'
+    ? null
+    : crypto.randomBytes(32).toString('hex');
 const SERVICE_FEE = 500;
 const DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
 const DEFAULT_BANNER = 'https://images.unsplash.com/photo-1517433670267-08bbd4be890f?w=1000&auto=format&fit=crop&q=80';
 
-if (!JWT_SECRET || JWT_SECRET.length < 32) {
-  throw new Error('JWT_SECRET must be configured with at least 32 characters.');
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET must be configured with at least 32 characters in production.');
+}
+if (!isValidJwtSecret) {
+  console.warn('JWT_SECRET is not configured; using a temporary development secret. Set JWT_SECRET in .env to keep sessions across restarts.');
 }
 
-const cloudinaryConfigured = Boolean(
-  process.env.CLOUDINARY_CLOUD_NAME &&
-  process.env.CLOUDINARY_API_KEY &&
-  process.env.CLOUDINARY_API_SECRET
-);
+const uploadsDir = path.resolve('uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
-if (cloudinaryConfigured) {
+function isCloudinaryConfigured() {
+  const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) return false;
+  if (
+    CLOUDINARY_CLOUD_NAME.startsWith('replace-with') ||
+    CLOUDINARY_API_KEY.startsWith('replace-with') ||
+    CLOUDINARY_API_SECRET.startsWith('replace-with')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isPaystackConfigured() {
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  if (!key || typeof key !== 'string') return false;
+  if (key.startsWith('sk_test_replace_with') || key.startsWith('replace-with')) return false;
+  return true;
+}
+
+if (isCloudinaryConfigured()) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -38,6 +68,7 @@ if (cloudinaryConfigured) {
 }
 
 app.use(cors());
+app.use('/uploads', express.static(uploadsDir));
 
 function safeUser(user) {
   const { passwordHash, ...publicUser } = user;
@@ -80,7 +111,13 @@ function presentOrder(order) {
 
 function sendError(res, error, status = 500) {
   if (status >= 500) console.error(error);
-  const message = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error
+    ? error.message
+    : (error && typeof error === 'object' && error.message)
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : JSON.stringify(error) || 'An unexpected error occurred.';
   return res.status(status).json({
     error: status >= 500 && process.env.NODE_ENV === 'production'
       ? 'The server could not complete the request. Check the server logs for details.'
@@ -122,6 +159,16 @@ function requireVendor(req, res, next) {
 }
 
 async function verifyPaystackTransaction(reference, expectedOrder) {
+  if (!isPaystackConfigured() || expectedOrder.paymentProvider === 'TEST_MODE') {
+    return {
+      status: 'success',
+      reference,
+      amount: Math.round(expectedOrder.totalAmount * 100),
+      currency: 'NGN',
+      metadata: { orderId: expectedOrder.id },
+    };
+  }
+
   if (!process.env.PAYSTACK_SECRET_KEY) {
     throw new Error('Paystack is not configured. Set PAYSTACK_SECRET_KEY on the server.');
   }
@@ -132,7 +179,10 @@ async function verifyPaystackTransaction(reference, expectedOrder) {
   );
   const result = await response.json();
   if (!response.ok || !result.status) {
-    throw new Error(result.message || 'Paystack could not verify this transaction.');
+    const errorMsg = result.message === 'Invalid key'
+      ? 'Invalid Paystack secret key. Please check PAYSTACK_SECRET_KEY in your .env file.'
+      : (result.message || 'Paystack could not verify this transaction.');
+    throw new Error(errorMsg);
   }
 
   const transaction = result.data;
@@ -363,23 +413,78 @@ app.post('/api/v1/products', authenticateToken, requireVendor, async (req, res) 
   }
 });
 
-app.post('/api/v1/uploads', authenticateToken, (req, res) => {
-  if (!cloudinaryConfigured) {
-    return res.status(503).json({ error: 'Image uploads are not configured. Set the Cloudinary environment variables.' });
+app.patch('/api/v1/products/:id', authenticateToken, requireVendor, async (req, res) => {
+  const { name, description, price, originalPrice, stockQuantity, imageUrl, category, badge } = req.body;
+  if (typeof name !== 'undefined' && (typeof name !== 'string' || !name.trim())) {
+    return res.status(400).json({ error: 'Product name cannot be empty.' });
+  }
+  if (typeof price !== 'undefined' && (!Number.isFinite(Number(price)) || Number(price) <= 0)) {
+    return res.status(400).json({ error: 'A valid price greater than zero is required.' });
+  }
+  if (typeof stockQuantity !== 'undefined' && (!Number.isInteger(Number(stockQuantity)) || Number(stockQuantity) < 0)) {
+    return res.status(400).json({ error: 'Stock quantity must be a non-negative whole number.' });
   }
 
-  upload.single('image')(req, res, (uploadError) => {
+  try {
+    const existing = await prisma.products.findUnique({
+      where: { id: req.params.id },
+      include: { store: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Product was not found.' });
+    }
+    if (req.user.role !== 'ADMIN' && existing.store.vendorId !== req.user.id) {
+      return res.status(403).json({ error: 'You can only update products belonging to your store.' });
+    }
+
+    const updated = await prisma.products.update({
+      where: { id: req.params.id },
+      data: {
+        ...(typeof name === 'string' ? { name: name.trim() } : {}),
+        ...(typeof description !== 'undefined' ? { description: description || null } : {}),
+        ...(typeof price !== 'undefined' ? { price: Number(price) } : {}),
+        ...(typeof originalPrice !== 'undefined'
+          ? { originalPrice: originalPrice === '' || originalPrice == null ? null : Number(originalPrice) }
+          : {}),
+        ...(typeof stockQuantity !== 'undefined' ? { stockQuantity: Number(stockQuantity) } : {}),
+        ...(typeof imageUrl !== 'undefined' ? { imageUrl: imageUrl || null } : {}),
+        ...(typeof category === 'string' && category.trim() ? { category: category.trim() } : {}),
+        ...(typeof badge !== 'undefined' ? { badge: badge || null } : {}),
+      },
+      include: { store: { select: { storeName: true } } },
+    });
+
+    return res.json(presentProduct(updated));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+app.post('/api/v1/uploads', authenticateToken, (req, res) => {
+  upload.single('image')(req, res, async (uploadError) => {
     if (uploadError) return res.status(400).json({ error: uploadError.message });
     if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' });
 
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: 'newmarket', resource_type: 'image' },
-      (error, result) => {
-        if (error) return sendError(res, error);
-        return res.status(201).json({ url: result.secure_url });
-      },
-    );
-    stream.end(req.file.buffer);
+    if (isCloudinaryConfigured()) {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: 'newmarket', resource_type: 'image' },
+        (error, result) => {
+          if (error) return sendError(res, error);
+          return res.status(201).json({ url: result.secure_url });
+        },
+      );
+      stream.end(req.file.buffer);
+    } else {
+      try {
+        const ext = path.extname(req.file.originalname) || '.png';
+        const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
+        const filePath = path.join(uploadsDir, filename);
+        await fs.promises.writeFile(filePath, req.file.buffer);
+        return res.status(201).json({ url: `/uploads/${filename}` });
+      } catch (saveError) {
+        return sendError(res, saveError);
+      }
+    }
   });
 });
 
@@ -401,10 +506,6 @@ app.post('/api/v1/orders/checkout', authenticateToken, async (req, res) => {
     requestedItems.set(item.id, (requestedItems.get(item.id) || 0) + Number(item.quantity));
   }
 
-  if (!process.env.PAYSTACK_SECRET_KEY) {
-    return res.status(503).json({ error: 'Payments are not configured. Set PAYSTACK_SECRET_KEY on the server.' });
-  }
-
   try {
     const products = await prisma.products.findMany({
       where: { id: { in: [...requestedItems.keys()] } },
@@ -424,13 +525,16 @@ app.post('/api/v1/orders/checkout', authenticateToken, async (req, res) => {
       (sum, product) => sum + product.price * requestedItems.get(product.id),
       0,
     );
+    const callbackUrl = process.env.PAYSTACK_CALLBACK_URL || 'http://localhost:3000/payment/callback';
+    const paystackActive = isPaystackConfigured();
+
     const order = await prisma.orders.create({
       data: {
         buyerId: req.user.id,
         totalAmount: subtotal + SERVICE_FEE,
         paymentStatus: 'PENDING',
         paymentReference: reference,
-        paymentProvider: 'PAYSTACK',
+        paymentProvider: paystackActive ? 'PAYSTACK' : 'TEST_MODE',
         buyerHostel: buyerHostel || null,
         campus: campus || req.user.campus || null,
         orderItems: {
@@ -445,7 +549,15 @@ app.post('/api/v1/orders/checkout', authenticateToken, async (req, res) => {
       include: { buyer: true, orderItems: { include: { store: true, product: true } } },
     });
 
-    const callbackUrl = process.env.PAYSTACK_CALLBACK_URL || 'http://localhost:3000/payment/callback';
+    if (!paystackActive) {
+      const mockAuthUrl = `${callbackUrl}?reference=${encodeURIComponent(reference)}&test_mode=true`;
+      return res.status(201).json({
+        order: presentOrder(order),
+        authorizationUrl: mockAuthUrl,
+        reference,
+      });
+    }
+
     const paymentResponse = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
@@ -467,7 +579,10 @@ app.post('/api/v1/orders/checkout', authenticateToken, async (req, res) => {
         prisma.orderItems.deleteMany({ where: { orderId: order.id } }),
         prisma.orders.delete({ where: { id: order.id } }),
       ]);
-      return res.status(502).json({ error: payment.message || 'Could not initialize the Paystack transaction.' });
+      const message = payment.message === 'Invalid key'
+        ? 'Invalid Paystack secret key. Please check PAYSTACK_SECRET_KEY in your .env file, or keep the default placeholder to enable simulated local checkout.'
+        : (payment.message || 'Could not initialize the Paystack transaction.');
+      return res.status(502).json({ error: message });
     }
     return res.status(201).json({
       order: presentOrder(order),
