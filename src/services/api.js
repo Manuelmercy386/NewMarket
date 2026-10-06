@@ -1,130 +1,114 @@
-// Frontend API service to communicate with the Express backend tier
 const API_BASE = '/api/v1';
 
+async function request(path, options = {}) {
+  const token = Object.hasOwn(options, 'token') ? options.token : localStorage.getItem('newmarket_token');
+  const headers = new Headers(options.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (networkError) {
+    throw new Error('Cannot connect to the backend server. Please make sure the API server is running on port 5000 (`npm run server`).');
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if ((response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504) && !data.error) {
+      throw new Error('Backend server is unreachable or not running. Please start the server using `npm run server` or `npm run dev`.');
+    }
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
+  return data;
+}
+
 export const api = {
-  // Stores
-  async getStores() {
-    try {
-      const res = await fetch(`${API_BASE}/stores`);
-      if (!res.ok) throw new Error('Failed to fetch stores');
-      const data = await res.json();
-      localStorage.setItem('nm_cached_stores', JSON.stringify(data));
-      return data;
-    } catch (err) {
-      console.warn('API error, using local cache:', err);
-      const cached = localStorage.getItem('nm_cached_stores');
-      return cached ? JSON.parse(cached) : null;
-    }
+  register(credentials) {
+    return request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(credentials),
+      token: null,
+    });
   },
 
-  async createStore(storeData, token) {
-    try {
-      const res = await fetch(`${API_BASE}/stores`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(storeData),
-      });
-      if (!res.ok) throw new Error('Failed to create store');
-      return await res.json();
-    } catch (err) {
-      console.error('Error creating store on backend:', err);
-      return storeData;
-    }
+  login(credentials) {
+    return request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(credentials),
+      token: null,
+    });
   },
 
-  // Products
-  async getProducts(params = {}) {
-    try {
-      const query = new URLSearchParams();
-      if (params.category && params.category !== 'all') query.append('category', params.category);
-      if (params.store_id) query.append('store_id', params.store_id);
-      if (params.search) query.append('search', params.search);
-
-      const res = await fetch(`${API_BASE}/products?${query.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch products');
-      const data = await res.json();
-      localStorage.setItem('nm_cached_products', JSON.stringify(data));
-      return data;
-    } catch (err) {
-      console.warn('API error, using local cache:', err);
-      const cached = localStorage.getItem('nm_cached_products');
-      return cached ? JSON.parse(cached) : null;
-    }
+  getCurrentUser() {
+    return request('/auth/me');
   },
 
-  async createProduct(productData, token) {
-    try {
-      const res = await fetch(`${API_BASE}/products`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(productData),
-      });
-      if (!res.ok) throw new Error('Failed to create product');
-      return await res.json();
-    } catch (err) {
-      console.error('Error creating product on backend:', err);
-      return productData;
-    }
+  getStores() {
+    return request('/stores');
   },
 
-  // Orders & Multi-Vendor Checkout
-  async checkout(orderPayload, token) {
-    try {
-      const res = await fetch(`${API_BASE}/orders/checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(orderPayload),
-      });
-      if (!res.ok) throw new Error('Failed to process checkout');
-      const data = await res.json();
-      return data.order;
-    } catch (err) {
-      console.error('Checkout API error:', err);
-      return null;
-    }
+  createStore(storeData) {
+    return request('/stores', {
+      method: 'POST',
+      body: JSON.stringify(storeData),
+    });
   },
 
-  async getMyOrders(token) {
-    try {
-      const res = await fetch(`${API_BASE}/orders/my-orders`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to fetch orders');
-      const data = await res.json();
-      localStorage.setItem('nm_cached_orders', JSON.stringify(data));
-      return data;
-    } catch (err) {
-      console.warn('API error fetching orders, using cache:', err);
-      const cached = localStorage.getItem('nm_cached_orders');
-      return cached ? JSON.parse(cached) : null;
-    }
+  getProducts(params = {}) {
+    const query = new URLSearchParams();
+    if (params.category && params.category !== 'all') query.set('category', params.category);
+    if (params.store_id) query.set('store_id', params.store_id);
+    if (params.search) query.set('search', params.search);
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return request(`/products${suffix}`);
   },
 
-  async updateOrderStatus(itemId, status, token) {
-    try {
-      const res = await fetch(`${API_BASE}/vendor/orders/${itemId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ status }),
-      });
-      return await res.json();
-    } catch (err) {
-      console.error('Error updating order status:', err);
-      return null;
-    }
+  createProduct(productData) {
+    return request('/products', {
+      method: 'POST',
+      body: JSON.stringify(productData),
+    });
+  },
+
+  uploadImage(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    return request('/uploads', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
+  checkout(orderPayload) {
+    return request('/orders/checkout', {
+      method: 'POST',
+      body: JSON.stringify(orderPayload),
+    });
+  },
+
+  verifyPayment(reference) {
+    return request(`/payments/verify/${encodeURIComponent(reference)}`);
+  },
+
+  getMyOrders() {
+    return request('/orders/my-orders');
+  },
+
+  getVendorOrders() {
+    return request('/vendor/orders');
+  },
+
+  updateOrderStatus(itemId, status) {
+    return request(`/vendor/orders/${encodeURIComponent(itemId)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  getAdminOverview() {
+    return request('/admin/overview');
   },
 };

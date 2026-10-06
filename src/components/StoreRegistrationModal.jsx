@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { X, Store, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { X, Store, Sparkles, CheckCircle2 } from 'lucide-react';
+import { api } from '../services/api';
 
 export const StoreRegistrationModal = ({ isOpen, onClose, onStoreCreated }) => {
-  const { user, register } = useAuth();
+  const { user } = useAuth();
 
   const [formData, setFormData] = useState({
     storeName: '',
@@ -12,49 +13,37 @@ export const StoreRegistrationModal = ({ isOpen, onClose, onStoreCreated }) => {
     description: '',
     location: 'Moremi Hall, Block B (OAU)',
     whatsApp: '+2348012345678',
-    banner: 'https://images.unsplash.com/photo-1517433670267-08bbd4be890f?w=1000&auto=format&fit=crop&q=80',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    banner: '',
+    avatar: '',
   });
-
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [bannerFile, setBannerFile] = useState(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const newStore = {
-      id: `store-${Date.now()}`,
-      vendorId: user?.id || `user-vendor-${Date.now()}`,
-      vendorName: user?.fullName || 'Student Vendor',
-      storeName: formData.storeName,
-      slug: formData.storeName.toLowerCase().replace(/\s+/g, '-'),
-      tagline: formData.tagline || 'Quality student goods delivered right to your hostel!',
-      description: formData.description || 'Verified student-run campus business.',
-      category: formData.category,
-      avatar: formData.avatar,
-      banner: formData.banner,
-      rating: 5.0,
-      reviewsCount: 1,
-      deliveryTime: '15-25 mins',
-      location: formData.location,
-      verified: true,
-      badge: 'Campus Verified Vendor 🛡️',
-      whatsApp: formData.whatsApp,
-    };
-
-    register({
-      fullName: user?.fullName || 'Student Vendor',
-      email: user?.email || 'vendor@student.edu.ng',
-      role: 'VENDOR',
-      storeName: formData.storeName,
-    });
-
-    onStoreCreated(newStore);
-    setSubmitted(true);
-    setTimeout(() => {
-      setSubmitted(false);
-      onClose();
-    }, 1200);
+    setError('');
+    setSubmitting(true);
+    try {
+      const [avatar, banner] = await Promise.all([
+        avatarFile ? api.uploadImage(avatarFile).then((result) => result.url) : formData.avatar,
+        bannerFile ? api.uploadImage(bannerFile).then((result) => result.url) : formData.banner,
+      ]);
+      await onStoreCreated({ ...formData, avatar, banner });
+      setSubmitted(true);
+      setTimeout(() => {
+        setSubmitted(false);
+        onClose();
+      }, 1200);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -152,6 +141,18 @@ export const StoreRegistrationModal = ({ isOpen, onClose, onStoreCreated }) => {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-slate-700 font-bold">
+                  Store logo
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => setAvatarFile(e.target.files?.[0] || null)} className="mt-1.5 block w-full text-[11px] font-medium" />
+                </label>
+                <label className="block text-slate-700 font-bold">
+                  Store banner
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => setBannerFile(e.target.files?.[0] || null)} className="mt-1.5 block w-full text-[11px] font-medium" />
+                </label>
+              </div>
+
+              {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2.5 text-red-700">{error}</p>}
               <div className="pt-2 flex justify-end gap-3">
                 <button
                   type="button"
@@ -162,10 +163,11 @@ export const StoreRegistrationModal = ({ isOpen, onClose, onStoreCreated }) => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submitting}
                   className="px-6 py-2.5 rounded-xl bg-[#ff7e00] hover:bg-[#e57100] text-white font-extrabold shadow-sm flex items-center gap-1.5 transition"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>Launch Storefront</span>
+                  <span>{submitting ? 'Creating…' : 'Launch Storefront'}</span>
                 </button>
               </div>
             </form>

@@ -3,7 +3,7 @@ import { useCart } from '../context/CartContext';
 import { Package, Store, Eye, ShieldCheck, CheckCircle } from 'lucide-react';
 
 export const BuyerOrdersPage = ({ onOpenOrderTracker }) => {
-  const { orders } = useCart();
+  const { orders, ordersError } = useCart();
 
   const formatPrice = (val) => `₦${Number(val).toLocaleString()}`;
 
@@ -16,18 +16,20 @@ export const BuyerOrdersPage = ({ onOpenOrderTracker }) => {
             <Package className="w-6 h-6 text-[#395082]" />
             <span>My Campus Orders</span>
           </h1>
-          <p className="text-xs text-slate-500">Track all your multi-vendor purchases and escrow sub-order states</p>
+          <p className="text-xs text-slate-500">Track your multi-vendor orders and verified payment status</p>
         </div>
         <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-[#395082] border border-blue-100">
           {orders.length} Total Orders
         </span>
       </div>
 
+      {ordersError && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-xs text-red-700">{ordersError}</p>}
+
       {orders.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 space-y-3 shadow-sm">
           <Package className="w-12 h-12 text-slate-400 mx-auto" />
           <h3 className="text-base font-bold text-slate-800">No Orders Placed Yet</h3>
-          <p className="text-xs text-slate-500">Add products from campus stores to place your first escrow-protected order.</p>
+          <p className="text-xs text-slate-500">Add products from campus stores to place your first order.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -39,7 +41,11 @@ export const BuyerOrdersPage = ({ onOpenOrderTracker }) => {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-extrabold text-slate-900">{order.id}</span>
-                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-green-50 text-[#1b9e4b] border border-green-200 flex items-center gap-1">
+                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                      order.paymentStatus === 'PAID'
+                        ? 'bg-green-50 text-[#1b9e4b] border-green-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
                       <ShieldCheck className="w-3 h-3" />
                       <span>{order.paymentStatus.replace(/_/g, ' ')}</span>
                     </span>

@@ -9,14 +9,12 @@ import {
   Store, 
   ShieldCheck, 
   ArrowRight, 
-  CheckCircle2, 
-  CreditCard,
   ShoppingBag,
   Sparkles,
   Lock
 } from 'lucide-react';
 
-export const MultiVendorCartDrawer = () => {
+export const MultiVendorCartDrawer = ({ onNavigate }) => {
   const { 
     cart, 
     isCartOpen, 
@@ -28,29 +26,38 @@ export const MultiVendorCartDrawer = () => {
     campusServiceFee, 
     grandTotal, 
     processCheckout,
-    setActiveTrackingOrder
   } = useCart();
 
   const { user } = useAuth();
 
-  const [checkoutStep, setCheckoutStep] = useState('cart'); // 'cart' | 'checkout' | 'success'
-  const [lastCreatedOrder, setLastCreatedOrder] = useState(null);
+  const [checkoutStep, setCheckoutStep] = useState('cart'); // 'cart' | 'checkout'
   const [hostelAddress, setHostelAddress] = useState('Fajuyi Hall, Block 3, Room 14 (OAU)');
+  const [checkoutError, setCheckoutError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   if (!isCartOpen) return null;
 
   const handleCheckoutSubmit = async (e) => {
     e.preventDefault();
-    const created = await processCheckout({
-      id: user?.id,
-      fullName: user?.fullName || 'Tobi Adebayo',
-      email: user?.email || 'tobi@student.edu.ng',
-      hostel: hostelAddress,
-      campus: user?.campus || 'Obafemi Awolowo University (OAU)',
-    });
-
-    setLastCreatedOrder(created);
-    setCheckoutStep('success');
+    if (!user) {
+      onNavigate('/login');
+      return;
+    }
+    setCheckoutError('');
+    setSubmitting(true);
+    try {
+      const result = await processCheckout({
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        hostel: hostelAddress,
+        campus: user.campus,
+      });
+      window.location.assign(result.authorizationUrl);
+    } catch (error) {
+      setCheckoutError(error.message);
+      setSubmitting(false);
+    }
   };
 
   const closeDrawer = () => {
@@ -78,7 +85,7 @@ export const MultiVendorCartDrawer = () => {
               <h3 className="font-extrabold text-slate-900 text-sm">Unified Campus Cart</h3>
               <p className="text-[10px] text-[#1b9e4b] font-semibold flex items-center gap-1">
                 <Lock className="w-3 h-3" />
-                <span>Escrow Payment Protection Active</span>
+                <span>Secure payment with Paystack</span>
               </p>
             </div>
           </div>
@@ -114,7 +121,7 @@ export const MultiVendorCartDrawer = () => {
                   <div className="p-3 rounded-2xl bg-blue-50/80 border border-blue-100 text-xs text-[#2c3f68] flex items-start gap-2.5">
                     <ShieldCheck className="w-4 h-4 text-[#395082] shrink-0 mt-0.5" />
                     <p className="text-[11px] leading-relaxed">
-                      Your items are grouped into <strong>{Object.keys(itemsByStore).length} vendor sub-orders</strong>. A single checkout splits payments directly to each store owner while funds remain escrow-protected.
+                      Your items are grouped into <strong>{Object.keys(itemsByStore).length} vendor sub-orders</strong>. Paystack confirms one payment before vendors begin fulfillment.
                     </p>
                   </div>
 
@@ -183,6 +190,12 @@ export const MultiVendorCartDrawer = () => {
           {checkoutStep === 'checkout' && (
             <form id="checkout-form" onSubmit={handleCheckoutSubmit} className="space-y-4">
               <h4 className="text-sm font-extrabold text-slate-900 border-b border-slate-100 pb-2">Delivery & Checkout</h4>
+
+              {!user && (
+                <p className="rounded-xl bg-amber-50 px-3.5 py-3 text-xs text-amber-800">
+                  Sign in before checkout. Your cart will be kept while you sign in.
+                </p>
+              )}
               
               <div>
                 <label className="text-xs text-slate-700 font-bold block mb-1">Student Buyer Name</label>
@@ -205,14 +218,14 @@ export const MultiVendorCartDrawer = () => {
                 />
               </div>
 
-              {/* Escrow Payment Notice */}
+              {/* Payment Notice */}
               <div className="p-3.5 rounded-2xl bg-green-50 border border-green-200 text-xs text-green-900 space-y-1.5">
                 <div className="flex items-center gap-1.5 font-bold text-[#1b9e4b]">
                   <Lock className="w-4 h-4" />
-                  <span>Escrow Safe Checkout</span>
+                  <span>Paystack checkout</span>
                 </div>
                 <p className="text-[11px] text-green-800 leading-relaxed">
-                  Your funds are held securely by the campus escrow system. Each student vendor only gets credited once you confirm doorstep delivery.
+                  Your payment is processed by Paystack. NewMarket verifies the transaction before the order is marked paid and made available for fulfillment.
                 </p>
               </div>
 
@@ -229,48 +242,12 @@ export const MultiVendorCartDrawer = () => {
             </form>
           )}
 
-          {checkoutStep === 'success' && lastCreatedOrder && (
-            <div className="text-center py-6 space-y-4">
-              <div className="w-14 h-14 rounded-full bg-green-100 text-[#1b9e4b] mx-auto flex items-center justify-center shadow-sm">
-                <CheckCircle2 className="w-8 h-8 text-[#1b9e4b]" />
-              </div>
-              <div>
-                <h4 className="text-base font-extrabold text-slate-900">Order Placed & Escrow Locked!</h4>
-                <p className="text-xs text-slate-500 mt-0.5">Order ID: <strong className="text-[#395082]">{lastCreatedOrder.id}</strong></p>
-              </div>
-
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-left space-y-2.5">
-                <p className="text-xs font-bold text-slate-800 border-b border-slate-200/80 pb-1.5">Vendor Sub-Orders Queue:</p>
-                {lastCreatedOrder.items.map((item) => (
-                  <div key={item.id} className="flex justify-between items-center text-xs bg-white p-2.5 rounded-xl border border-slate-200">
-                    <div>
-                      <p className="font-bold text-slate-900">{item.productName}</p>
-                      <p className="text-[11px] text-[#395082] font-semibold">{item.storeName}</p>
-                    </div>
-                    <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-blue-100 text-[#395082]">
-                      {item.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                onClick={() => {
-                  closeDrawer();
-                  setActiveTrackingOrder(lastCreatedOrder);
-                }}
-                className="w-full py-3 rounded-xl bg-[#395082] hover:bg-[#2c3f68] text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-sm transition"
-              >
-                <span>Track Live Sub-Order Timeline</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          {checkoutError && <p role="alert" className="rounded-xl bg-red-50 px-3.5 py-3 text-xs font-semibold text-red-700">{checkoutError}</p>}
 
         </div>
 
         {/* Footer Checkout Actions */}
-        {cart.length > 0 && checkoutStep !== 'success' && (
+        {cart.length > 0 && (
           <div className="p-4 border-t border-slate-100 bg-white space-y-3">
             <div className="space-y-1.5 text-xs text-slate-500">
               <div className="flex justify-between">
@@ -278,7 +255,7 @@ export const MultiVendorCartDrawer = () => {
                 <span className="text-slate-900 font-bold">{formatPrice(subtotal)}</span>
               </div>
               <div className="flex justify-between">
-                <span>Campus Escrow & Delivery Fee</span>
+                <span>Campus Service & Delivery Fee</span>
                 <span className="text-slate-900 font-bold">{formatPrice(campusServiceFee)}</span>
               </div>
               <div className="flex justify-between text-sm font-extrabold text-slate-900 border-t border-slate-100 pt-2">
@@ -307,10 +284,11 @@ export const MultiVendorCartDrawer = () => {
                 <button
                   type="submit"
                   form="checkout-form"
+                  disabled={submitting}
                   className="flex-1 py-3.5 rounded-xl bg-[#1b9e4b] hover:bg-[#16863f] text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-sm transition"
                 >
                   <Lock className="w-3.5 h-3.5" />
-                  <span>Pay & Lock Escrow ({formatPrice(grandTotal)})</span>
+                  <span>{submitting ? 'Opening Paystack…' : `Pay securely (${formatPrice(grandTotal)})`}</span>
                 </button>
               </div>
             )}
